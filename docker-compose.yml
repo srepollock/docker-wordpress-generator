@@ -5,14 +5,50 @@ services:
      image: jwilder/nginx-proxy
      ports:
        - "80:80"
+       - "443:443"
      volumes:
        - /var/run/docker.sock:/tmp/docker.sock:ro
+       - certs:/etc/nginx/certs
+       - vhost:/etc/nginx/vhost.d
+       - html:/usr/share/nginx/html
+       - conf:/etc/nginx/conf.d
      networks:
         - wordpress-net
+     restart: always
+   dockergen:
+       image: jwilder/docker-gen:latest
+       depends_on:
+           - nginx-proxy
+       command: -notify-sighup wordpress_nginx-proxy -watch -wait 5s:30s /etc/docker-gen/templates/nginx.tmpl /etc/nginx/conf.d/default.conf
+       volumes:
+           - conf:/etc/nginx/conf.d
+           - vhost:/etc/nginx/vhost.d
+           - html:/usr/share/nginx/html
+           - certs:/etc/nginx/certs
+           - /var/run/docker.sock:/tmp/docker.sock:ro
+           - ./nginx.tmpl:/etc/docker-gen/templates/nginx.tmpl:ro
+   letsencrypt:
+     image: jrcs/letsencrypt-nginx-proxy-companion
+     depends_on:
+         - nginx-proxy
+         - dockergen
+     volumes:
+         - /var/run/docker.sock:/var/run/docker.sock:ro
+         - certs:/etc/nginx/certs
+         - vhost:/etc/nginx/vhost.d
+         - html:/usr/share/nginx/html
+         - conf:/etc/nginx/conf.d
+     environment:
+         NGINX_PROXY_CONTAINER: nginx-proxy
+         NGINX_DOCKER_GEN_CONTAINER: nginx-proxy-gen
+         DEFAULT_EMAIL: support@spollock.ca
+     networks:
+         - wordpress-net
      restart: always
    db:
      depends_on:
         - nginx-proxy
+        - letsencrypt
      image: mysql:5.7
      volumes:
        - db_data:/var/lib/mysql
@@ -29,9 +65,11 @@ services:
      depends_on:
        - db
        - nginx-proxy
+       - letsencrypt
      image: wordpress:latest
      expose:
         - "80"
+        - "443"
      restart: always
      environment:
        WORDPRESS_DB_HOST: db:3306
@@ -39,9 +77,14 @@ services:
        WORDPRESS_DB_PASSWORD: wordpress
        WORDPRESS_DB_NAME: wordpress
        VIRTUAL_HOST: wordpress.spollock.xyz 
+       LETSENCRYPT_HOST: wordpress.spollock.xyz
      networks:
         - wordpress-net
 volumes:
     db_data: {}
+    conf:
+    vhost:
+    html:
+    certs:
 networks:
     wordpress-net:
